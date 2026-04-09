@@ -1,0 +1,12 @@
+{
+  "name": "elnamu-forest",
+  "version": "1.0.0",
+  "description": "엘나무숲 - 익명 대나무숲 게시판",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

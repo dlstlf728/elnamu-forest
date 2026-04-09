@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>엘나무숲</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== 숲 페이지 (메인) ===== -->
+  <div id="forestPage" class="page active">
+    <nav class="nav">
+      <span class="nav-title">엘나무숲</span>
+      <button id="goLogBtn" class="nav-btn">로그</button>
+    </nav>
+
+    <div class="forest-stage">
+      <span class="tree tree-1">🌲</span>
+      <span class="tree tree-2">🌳</span>
+      <span class="tree tree-3">🌴</span>
+      <span class="tree tree-4">🌲</span>
+      <span class="tree tree-5">🌳</span>
+      <span class="tree tree-6">🌵</span>
+      <span class="tree tree-7">🌲</span>
+      <span class="tree tree-8">🪾</span>
+      <span class="tree tree-9">🌴</span>
+      <span class="tree tree-10">🌳</span>
+      <span class="tree tree-11">🌲</span>
+      <span class="tree tree-12">🌵</span>
+      <span class="tree tree-13">🪾</span>
+      <span class="tree tree-14">🌳</span>
+      <span class="tree tree-15">🌲</span>
+
+      <div id="echoContainer" class="echo-container"></div>
+
+      <p id="forestEmpty" class="forest-empty" style="display:none;">
+        오늘은 아직 아무도 속삭이지 않았어요...
+      </p>
+    </div>
+
+    <div class="write-dock">
+      <div class="write-dock-inner">
+        <textarea
+          id="postInput"
+          placeholder="대나무에게 속삭여보세요..."
+          maxlength="500"
+          rows="2"
+        ></textarea>
+        <div class="write-dock-footer">
+          <span class="char-count"><span id="charCount">0</span>/500</span>
+          <button id="submitBtn" class="pixel-btn">속삭이기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 로그 페이지 ===== -->
+  <div id="logPage" class="page">
+    <nav class="nav">
+      <button id="goForestBtn" class="nav-btn">숲</button>
+      <span class="nav-title">로그</span>
+    </nav>
+
+    <!-- 날짜 선택 바 -->
+    <div class="date-bar">
+      <button id="datePrevBtn" class="date-nav-btn">&lt;</button>
+      <span id="dateLabel" class="date-label">오늘</span>
+      <button id="dateNextBtn" class="date-nav-btn">&gt;</button>
+    </div>
+
+    <div class="log-container">
+      <div id="logList" class="log-list"></div>
+      <p id="logEmpty" class="forest-empty" style="display:none;">
+        이 날에는 속삭임이 없었어요.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===== 메시지 팝업 모달 ===== -->
+  <div id="postModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <button id="modalClose" class="modal-close">x</button>
+      <div id="modalContent" class="modal-content"></div>
+      <div id="modalReactions" class="modal-reactions"></div>
+      <div id="modalReplies" class="modal-replies"></div>
+      <div class="modal-reply-form">
+        <input id="modalReplyInput" type="text" placeholder="답글을 남겨보세요..." maxlength="200">
+        <button id="modalReplyBtn" class="pixel-btn pixel-btn-sm">답글</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
