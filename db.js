@@ -70,6 +70,20 @@ function addReaction(id, emoji) {
   return { ok: true, reactions: post.reactions };
 }
 
+function removeReaction(id, emoji) {
+  const db = readDB();
+  const post = db.posts.find((p) => p.id === id);
+  if (!post) return { error: '글을 찾을 수 없어요.', status: 404 };
+
+  if (!post.reactions) post.reactions = {};
+  if (post.reactions[emoji] && post.reactions[emoji] > 0) {
+    post.reactions[emoji]--;
+    if (post.reactions[emoji] === 0) delete post.reactions[emoji];
+  }
+  writeDB(db);
+  return { ok: true, reactions: post.reactions };
+}
+
 function addReply(id, content) {
   const db = readDB();
   const post = db.posts.find((p) => p.id === id);
@@ -128,6 +142,6 @@ function getTodayPosts() {
 }
 
 module.exports = {
-  createPost, deletePost, addReaction, addReply,
+  createPost, deletePost, addReaction, removeReaction, addReply,
   getPost, getPosts, getPostsByDate, getAvailableDates, getTodayPosts,
 };

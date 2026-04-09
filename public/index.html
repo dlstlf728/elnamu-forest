@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>엘나무숲</title>
+  <title>대나무숲</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,9 +11,22 @@
   <!-- ===== 숲 페이지 (메인) ===== -->
   <div id="forestPage" class="page active">
     <nav class="nav">
-      <span class="nav-title">엘나무숲</span>
-      <button id="goLogBtn" class="nav-btn">로그</button>
+      <span class="nav-title">대나무숲</span>
+      <div class="nav-right">
+        <button id="soundToggle" class="nav-btn nav-sound" title="소리 켜기">🔇</button>
+        <button id="goLogBtn" class="nav-btn">로그</button>
+      </div>
     </nav>
+
+    <!-- 타이틀 + 설명 -->
+    <div class="hero">
+      <h1 class="hero-title">대나무숲</h1>
+      <p class="hero-desc">
+        완전 익명 · IP 추적 없음 · 쿠키 없음<br>
+        작성 후 5분 이내 삭제 가능 · 페이지를 떠나면 삭제 불가
+      </p>
+      <div id="weatherBadge" class="weather-badge"></div>
+    </div>
 
     <div class="forest-stage">
       <span class="tree tree-1">🌲</span>
@@ -35,7 +48,7 @@
       <div id="echoContainer" class="echo-container"></div>
 
       <p id="forestEmpty" class="forest-empty" style="display:none;">
-        오늘은 아직 아무도 속삭이지 않았어요...
+        오늘은 아직 아무도 소리치지 않았어요...
       </p>
     </div>
 
@@ -43,13 +56,13 @@
       <div class="write-dock-inner">
         <textarea
           id="postInput"
-          placeholder="대나무에게 속삭여보세요..."
+          placeholder="대표님 귀는 당나귀 귀"
           maxlength="500"
           rows="2"
         ></textarea>
         <div class="write-dock-footer">
           <span class="char-count"><span id="charCount">0</span>/500</span>
-          <button id="submitBtn" class="pixel-btn">속삭이기</button>
+          <button id="submitBtn" class="pixel-btn">소리치기</button>
         </div>
       </div>
     </div>
@@ -59,7 +72,7 @@
   <div id="logPage" class="page">
     <nav class="nav">
       <button id="goForestBtn" class="nav-btn">숲</button>
-      <span class="nav-title">로그</span>
+      <span class="nav-title">대나무숲 로그</span>
     </nav>
 
     <!-- 날짜 선택 바 -->
@@ -72,7 +85,7 @@
     <div class="log-container">
       <div id="logList" class="log-list"></div>
       <p id="logEmpty" class="forest-empty" style="display:none;">
-        이 날에는 속삭임이 없었어요.
+        이 날에는 기록이 없어요.
       </p>
     </div>
   </div>
@@ -91,6 +104,10 @@
     </div>
   </div>
 
+  <!-- 날씨 효과 레이어 (body 직속, fixed) -->
+  <div id="weatherLayer" class="weather-layer"></div>
+
+  <script src="audio.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

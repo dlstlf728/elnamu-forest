@@ -1,4 +1,5 @@
 // ===== DOM =====
+const soundToggle = document.getElementById('soundToggle');
 const forestPage = document.getElementById('forestPage');
 const logPage = document.getElementById('logPage');
 const postInput = document.getElementById('postInput');
@@ -33,6 +34,16 @@ let availableDates = [];
 let currentDateIdx = 0;
 let currentModalPostId = null;
 const EMOJIS = ['❤️', '😂', '😢', '👍', '🔥', '🍃'];
+
+// 에코 겹침 방지용 - 현재 화면에 있는 메시지 위치 추적
+let activeEchoPositions = [];
+
+// ===== 사운드 토글 =====
+soundToggle.addEventListener('click', () => {
+  const on = window.forestAudio.toggle();
+  soundToggle.textContent = on ? '🔊' : '🔇';
+  soundToggle.title = on ? '소리 끄기' : '소리 켜기';
+});
 
 // ===== 페이지 전환 =====
 goLogBtn.addEventListener('click', () => {
@@ -86,7 +97,7 @@ async function submitPost() {
   } catch { showToast('연결할 수 없어요'); }
   finally {
     submitBtn.disabled = false;
-    submitBtn.textContent = '속삭이기';
+    submitBtn.textContent = '소리치기';
   }
 }
 
@@ -102,7 +113,7 @@ async function deletePostById(id) {
     });
     if (res.ok) {
       myPosts.delete(id);
-      showToast('속삭임이 사라졌어요');
+      showToast('사라졌어요');
       if (forestPage.classList.contains('active')) refreshEcho();
       else loadDatePosts();
       if (currentModalPostId === id) closeModal();
@@ -123,6 +134,7 @@ function canDelete(id) {
 // ===== 에코 (숲 메인) =====
 async function refreshEcho() {
   stopEcho();
+  activeEchoPositions = [];
   try {
     const res = await fetch('/api/posts/today');
     todayPosts = await res.json();
@@ -136,6 +148,26 @@ async function refreshEcho() {
   forestEmpty.style.display = 'none';
   echoIndex = 0;
   showNextEcho();
+}
+
+function findNonOverlappingPosition(stage, elWidth, elHeight) {
+  const maxX = Math.max(stage.width - elWidth - 20, 20);
+  const maxY = Math.max(stage.height - elHeight - 20, 20);
+  const padding = 30;
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const x = Math.random() * maxX + 10;
+    const y = Math.random() * maxY * 0.7 + maxY * 0.05;
+
+    const overlaps = activeEchoPositions.some((pos) => {
+      return Math.abs(pos.x - x) < (pos.w + elWidth) / 2 + padding &&
+             Math.abs(pos.y - y) < (pos.h + elHeight) / 2 + padding;
+    });
+
+    if (!overlaps) return { x, y };
+  }
+  // 못 찾으면 그냥 랜덤
+  return { x: Math.random() * maxX + 10, y: Math.random() * maxY * 0.7 + maxY * 0.05 };
 }
 
 function showNextEcho() {
@@ -171,13 +203,22 @@ function showNextEcho() {
   }
 
   const stage = echoContainer.parentElement.getBoundingClientRect();
-  const maxX = Math.max(stage.width - 300, 20);
-  const maxY = Math.max(stage.height - 100, 20);
-  el.style.left = (Math.random() * maxX) + 'px';
-  el.style.top = (Math.random() * maxY * 0.7 + maxY * 0.05) + 'px';
+  const estWidth = Math.min(textSpan.textContent.length * 12, 340);
+  const estHeight = 60;
+  const pos = findNonOverlappingPosition(stage, estWidth, estHeight);
+
+  el.style.left = pos.x + 'px';
+  el.style.top = pos.y + 'px';
+
+  const posRecord = { x: pos.x, y: pos.y, w: estWidth, h: estHeight };
+  activeEchoPositions.push(posRecord);
 
   echoContainer.appendChild(el);
-  el.addEventListener('animationend', () => el.remove());
+  el.addEventListener('animationend', () => {
+    el.remove();
+    const idx = activeEchoPositions.indexOf(posRecord);
+    if (idx !== -1) activeEchoPositions.splice(idx, 1);
+  });
 
   echoIndex++;
   const delay = 3000 + Math.random() * 2000;
@@ -209,16 +250,18 @@ function renderModal(post) {
   EMOJIS.forEach((emoji) => {
     const btn = document.createElement('button');
     btn.className = 'react-btn';
+    const key = `${post.id}-${emoji}`;
+    if (myReactions.has(key)) btn.classList.add('active');
     const count = reactions[emoji] || 0;
     btn.innerHTML = emoji + (count > 0 ? `<span class="react-count">${count}</span>` : '');
-    btn.addEventListener('click', () => reactToPost(post.id, emoji));
+    btn.addEventListener('click', () => toggleReaction(post.id, emoji));
     modalReactions.appendChild(btn);
   });
 
   // 답글
   renderReplies(post.replies || []);
 
-  // 삭제 버튼 (모달 내)
+  // 삭제 버튼
   const existingDel = document.querySelector('.modal-delete-btn');
   if (existingDel) existingDel.remove();
   if (canDelete(post.id)) {
@@ -254,7 +297,7 @@ postModal.addEventListener('click', (e) => {
   if (e.target === postModal) closeModal();
 });
 
-// 답글 보내기
+// 답글
 modalReplyBtn.addEventListener('click', sendReply);
 modalReplyInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') sendReply();
@@ -283,29 +326,32 @@ async function sendReply() {
   } catch { showToast('연결할 수 없어요'); }
 }
 
-// 이모지 반응
-async function reactToPost(postId, emoji) {
+// 이모지 반응 토글
+async function toggleReaction(postId, emoji) {
   const key = `${postId}-${emoji}`;
-  if (myReactions.has(key)) {
-    showToast('이미 반응했어요');
-    return;
-  }
+  const isActive = myReactions.has(key);
+
   try {
     const res = await fetch(`/api/posts/${postId}/react`, {
-      method: 'POST',
+      method: isActive ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ emoji }),
     });
     if (res.ok) {
       const data = await res.json();
-      myReactions.add(key);
-      // 반응 카운트 업데이트
+      if (isActive) {
+        myReactions.delete(key);
+      } else {
+        myReactions.add(key);
+      }
+      // 버튼 UI 업데이트
       const btns = modalReactions.querySelectorAll('.react-btn');
       btns.forEach((btn) => {
-        const btnEmoji = btn.textContent.replace(/\d+/g, '').trim();
+        const btnEmoji = btn.childNodes[0].textContent.trim();
         if (btnEmoji === emoji) {
-          const count = data.reactions[emoji] || 0;
-          btn.innerHTML = emoji + `<span class="react-count">${count}</span>`;
+          const count = (data.reactions && data.reactions[emoji]) || 0;
+          btn.innerHTML = emoji + (count > 0 ? `<span class="react-count">${count}</span>` : '');
+          btn.classList.toggle('active', myReactions.has(key));
         }
       });
     }
@@ -462,5 +508,102 @@ function showToast(message) {
   }, 2000);
 }
 
+// ===== 날씨 + 낮/밤 =====
+const weatherLayer = document.getElementById('weatherLayer');
+const weatherBadge = document.getElementById('weatherBadge');
+let weatherInterval = null;
+
+async function initWeatherAndTheme() {
+  try {
+    const res = await fetch('/api/weather');
+    const data = await res.json();
+    applyDayNight(data.sunrise, data.sunset);
+    applyWeather(data.weather);
+    window.forestAudio.setWeather(data.weather);
+    showWeatherBadge(data);
+  } catch {
+    applyDayNightByHour();
+  }
+}
+
+function parseTime12(str) {
+  // "06:23 AM" → 분 단위
+  const match = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!match) return 0;
+  let h = parseInt(match[1]);
+  const m = parseInt(match[2]);
+  const ampm = match[3].toUpperCase();
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return h * 60 + m;
+}
+
+function applyDayNight(sunrise, sunset) {
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const sunriseMin = parseTime12(sunrise);
+  const sunsetMin = parseTime12(sunset);
+
+  if (nowMin >= sunriseMin && nowMin < sunsetMin) {
+    document.body.classList.add('light');
+  } else {
+    document.body.classList.remove('light');
+  }
+}
+
+function applyDayNightByHour() {
+  const h = new Date().getHours();
+  if (h >= 6 && h < 18) {
+    document.body.classList.add('light');
+  } else {
+    document.body.classList.remove('light');
+  }
+}
+
+function applyWeather(weather) {
+  if (weatherInterval) clearInterval(weatherInterval);
+  weatherLayer.innerHTML = '';
+
+  // 천둥 효과
+  const existingLightning = document.querySelector('.weather-lightning');
+  if (existingLightning) existingLightning.remove();
+
+  if (weather === 'rain' || weather === 'thunder') {
+    const emojis = ['💧', '💧', '💧', '🌧️'];
+    const count = weather === 'thunder' ? 40 : 30;
+    weatherInterval = setInterval(() => spawnParticle(emojis, 'weather-rain', count), 150);
+
+    if (weather === 'thunder') {
+      const flash = document.createElement('div');
+      flash.className = 'weather-lightning';
+      flash.style.animationDuration = (4 + Math.random() * 6) + 's';
+      document.body.appendChild(flash);
+    }
+  } else if (weather === 'snow') {
+    const emojis = ['❄️', '❄️', '❄️', '⛄'];
+    weatherInterval = setInterval(() => spawnParticle(emojis, 'weather-snow', 15), 400);
+  }
+}
+
+function spawnParticle(emojis, className, maxCount) {
+  if (weatherLayer.children.length > maxCount) return;
+  const p = document.createElement('span');
+  p.className = `weather-particle ${className}`;
+  p.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+  p.style.left = Math.random() * 100 + 'vw';
+  p.style.animationDuration = (parseFloat(p.style.animationDuration) || (className === 'weather-snow' ? 4 + Math.random() * 4 : 0.8 + Math.random() * 0.6)) + 's';
+  p.style.opacity = 0.2 + Math.random() * 0.4;
+  p.style.fontSize = (className === 'weather-snow' ? 10 + Math.random() * 12 : 10 + Math.random() * 6) + 'px';
+  weatherLayer.appendChild(p);
+  p.addEventListener('animationend', () => p.remove());
+}
+
+function showWeatherBadge(data) {
+  const icons = { clear: '☀️', cloudy: '☁️', rain: '🌧️', snow: '❄️', thunder: '⛈️' };
+  const icon = icons[data.weather] || '🌤️';
+  weatherBadge.textContent = `${icon} ${data.desc || data.weather} ${data.temp}°C`;
+}
+
 // ===== 초기 로드 =====
 refreshEcho();
+initWeatherAndTheme();
