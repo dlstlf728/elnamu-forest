@@ -37,6 +37,8 @@ const EMOJIS = ['❤️', '😂', '😢', '👍', '🔥', '🍃'];
 
 // 에코 겹침 방지용 - 현재 화면에 있는 메시지 위치 추적
 let activeEchoPositions = [];
+// 현재 화면에 떠있는 post id 집합 (중복 방지)
+const activeEchoIds = new Set();
 
 // ===== 사운드 토글 =====
 soundToggle.addEventListener('click', () => {
@@ -135,6 +137,7 @@ function canDelete(id) {
 async function refreshEcho() {
   stopEcho();
   activeEchoPositions = [];
+  activeEchoIds.clear();
   try {
     const res = await fetch('/api/posts/today');
     todayPosts = await res.json();
@@ -147,7 +150,13 @@ async function refreshEcho() {
   }
   forestEmpty.style.display = 'none';
   echoIndex = 0;
-  showNextEcho();
+  // 초기에 여러 개 한꺼번에 띄우기 (스케줄 없이)
+  const initialCount = Math.min(todayPosts.length, 7);
+  for (let i = 0; i < initialCount; i++) {
+    setTimeout(() => spawnEcho(), i * 180);
+  }
+  // 그 이후엔 정기 스케줄로 이어감
+  setTimeout(showNextEcho, initialCount * 180 + 500);
 }
 
 function findNonOverlappingPosition(stage, elWidth, elHeight) {
@@ -170,10 +179,25 @@ function findNonOverlappingPosition(stage, elWidth, elHeight) {
   return { x: Math.random() * maxX + 10, y: Math.random() * maxY * 0.7 + maxY * 0.05 };
 }
 
-function showNextEcho() {
+function spawnEcho() {
   if (todayPosts.length === 0) return;
 
-  const post = todayPosts[echoIndex % todayPosts.length];
+  // 모든 글이 이미 화면에 있으면 스킵
+  if (activeEchoIds.size >= todayPosts.length) return;
+
+  // 중복되지 않는 다음 글 찾기
+  let post = null;
+  for (let i = 0; i < todayPosts.length; i++) {
+    const candidate = todayPosts[(echoIndex + i) % todayPosts.length];
+    if (!activeEchoIds.has(candidate.id)) {
+      post = candidate;
+      echoIndex = (echoIndex + i) + 1;
+      break;
+    }
+  }
+  if (!post) return;
+
+  activeEchoIds.add(post.id);
   const el = document.createElement('div');
   el.className = 'echo-msg';
   el.style.cursor = 'pointer';
@@ -218,10 +242,13 @@ function showNextEcho() {
     el.remove();
     const idx = activeEchoPositions.indexOf(posRecord);
     if (idx !== -1) activeEchoPositions.splice(idx, 1);
+    activeEchoIds.delete(post.id);
   });
+}
 
-  echoIndex++;
-  const delay = 3000 + Math.random() * 2000;
+function showNextEcho() {
+  spawnEcho();
+  const delay = 700 + Math.random() * 600;
   echoTimer = setTimeout(showNextEcho, delay);
 }
 

@@ -1,144 +1,177 @@
-const fs = require('fs');
-const path = require('path');
+const { createClient } = require('@libsql/client');
 const crypto = require('crypto');
 
-const DB_PATH = path.join(__dirname, 'posts.json');
+// 환경변수로 Turso 연결. 없으면 로컬 sqlite 파일 fallback
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL || 'file:forest.db',
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
-function readDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    return { nextId: 1, posts: [] };
-  }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
+// 초기 스키마
+async function initDB() {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      delete_token TEXT NOT NULL,
+      reactions TEXT DEFAULT '{}',
+      replies TEXT DEFAULT '[]'
+    )
+  `);
 }
 
-function writeDB(data) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
+initDB().catch((e) => console.error('DB init error:', e));
+
+function parsePost(row) {
+  return {
+    id: row.id,
+    content: row.content,
+    created_at: row.created_at,
+    reactions: JSON.parse(row.reactions || '{}'),
+    replies: JSON.parse(row.replies || '[]'),
+  };
 }
 
-function stripToken(post) {
-  const { delete_token, ...rest } = post;
-  return rest;
-}
-
-function createPost(content) {
-  const db = readDB();
+async function createPost(content) {
   const now = new Date();
   now.setSeconds(0, 0);
   const created_at = now.toISOString().slice(0, 16) + ':00.000Z';
   const delete_token = crypto.randomUUID();
 
-  const post = {
-    id: db.nextId,
-    content,
-    created_at,
-    delete_token,
-    reactions: {},
-    replies: [],
-  };
+  const result = await db.execute({
+    sql: 'INSERT INTO posts (content, created_at, delete_token, reactions, replies) VALUES (?, ?, ?, ?, ?)',
+    args: [content, created_at, delete_token, '{}', '[]'],
+  });
 
-  db.posts.unshift(post);
-  db.nextId++;
-  writeDB(db);
-  return { id: post.id, delete_token };
+  return { id: Number(result.lastInsertRowid), delete_token };
 }
 
-function deletePost(id, token) {
-  const db = readDB();
-  const idx = db.posts.findIndex((p) => p.id === id);
-  if (idx === -1) return { error: '글을 찾을 수 없어요.', status: 404 };
+async function deletePost(id, token) {
+  const result = await db.execute({
+    sql: 'SELECT delete_token, created_at FROM posts WHERE id = ?',
+    args: [id],
+  });
+  if (result.rows.length === 0) return { error: '글을 찾을 수 없어요.', status: 404 };
 
-  const post = db.posts[idx];
-  if (post.delete_token !== token) return { error: '삭제 권한이 없어요.', status: 403 };
+  const row = result.rows[0];
+  if (row.delete_token !== token) return { error: '삭제 권한이 없어요.', status: 403 };
 
-  const created = new Date(post.created_at);
-  const now = new Date();
-  if (now - created > 5 * 60 * 1000) return { error: '5분이 지나 삭제할 수 없어요.', status: 403 };
+  const created = new Date(row.created_at);
+  if (Date.now() - created.getTime() > 5 * 60 * 1000) {
+    return { error: '5분이 지나 삭제할 수 없어요.', status: 403 };
+  }
 
-  db.posts.splice(idx, 1);
-  writeDB(db);
+  await db.execute({ sql: 'DELETE FROM posts WHERE id = ?', args: [id] });
   return { ok: true };
 }
 
-function addReaction(id, emoji) {
-  const db = readDB();
-  const post = db.posts.find((p) => p.id === id);
-  if (!post) return { error: '글을 찾을 수 없어요.', status: 404 };
+async function addReaction(id, emoji) {
+  const result = await db.execute({
+    sql: 'SELECT reactions FROM posts WHERE id = ?',
+    args: [id],
+  });
+  if (result.rows.length === 0) return { error: '글을 찾을 수 없어요.', status: 404 };
 
-  if (!post.reactions) post.reactions = {};
-  post.reactions[emoji] = (post.reactions[emoji] || 0) + 1;
-  writeDB(db);
-  return { ok: true, reactions: post.reactions };
+  const reactions = JSON.parse(result.rows[0].reactions || '{}');
+  reactions[emoji] = (reactions[emoji] || 0) + 1;
+
+  await db.execute({
+    sql: 'UPDATE posts SET reactions = ? WHERE id = ?',
+    args: [JSON.stringify(reactions), id],
+  });
+
+  return { ok: true, reactions };
 }
 
-function removeReaction(id, emoji) {
-  const db = readDB();
-  const post = db.posts.find((p) => p.id === id);
-  if (!post) return { error: '글을 찾을 수 없어요.', status: 404 };
+async function removeReaction(id, emoji) {
+  const result = await db.execute({
+    sql: 'SELECT reactions FROM posts WHERE id = ?',
+    args: [id],
+  });
+  if (result.rows.length === 0) return { error: '글을 찾을 수 없어요.', status: 404 };
 
-  if (!post.reactions) post.reactions = {};
-  if (post.reactions[emoji] && post.reactions[emoji] > 0) {
-    post.reactions[emoji]--;
-    if (post.reactions[emoji] === 0) delete post.reactions[emoji];
+  const reactions = JSON.parse(result.rows[0].reactions || '{}');
+  if (reactions[emoji] && reactions[emoji] > 0) {
+    reactions[emoji]--;
+    if (reactions[emoji] === 0) delete reactions[emoji];
   }
-  writeDB(db);
-  return { ok: true, reactions: post.reactions };
+
+  await db.execute({
+    sql: 'UPDATE posts SET reactions = ? WHERE id = ?',
+    args: [JSON.stringify(reactions), id],
+  });
+
+  return { ok: true, reactions };
 }
 
-function addReply(id, content) {
-  const db = readDB();
-  const post = db.posts.find((p) => p.id === id);
-  if (!post) return { error: '글을 찾을 수 없어요.', status: 404 };
+async function addReply(id, content) {
+  const result = await db.execute({
+    sql: 'SELECT replies FROM posts WHERE id = ?',
+    args: [id],
+  });
+  if (result.rows.length === 0) return { error: '글을 찾을 수 없어요.', status: 404 };
 
-  if (!post.replies) post.replies = [];
+  const replies = JSON.parse(result.rows[0].replies || '[]');
   const now = new Date();
   now.setSeconds(0, 0);
-
-  post.replies.push({
+  replies.push({
     content,
     created_at: now.toISOString().slice(0, 16) + ':00.000Z',
   });
-  writeDB(db);
-  return { ok: true, replies: post.replies };
+
+  await db.execute({
+    sql: 'UPDATE posts SET replies = ? WHERE id = ?',
+    args: [JSON.stringify(replies), id],
+  });
+
+  return { ok: true, replies };
 }
 
-function getPost(id) {
-  const db = readDB();
-  const post = db.posts.find((p) => p.id === id);
-  if (!post) return null;
-  return stripToken(post);
+async function getPost(id) {
+  const result = await db.execute({
+    sql: 'SELECT id, content, created_at, reactions, replies FROM posts WHERE id = ?',
+    args: [id],
+  });
+  if (result.rows.length === 0) return null;
+  return parsePost(result.rows[0]);
 }
 
-function getPosts(page = 1, limit = 20) {
-  const db = readDB();
-  const total = db.posts.length;
+async function getPosts(page = 1, limit = 20) {
   const offset = (page - 1) * limit;
-  const posts = db.posts.slice(offset, offset + limit).map(stripToken);
-  return { posts, total, page, totalPages: Math.ceil(total / limit) || 1 };
+  const result = await db.execute({
+    sql: 'SELECT id, content, created_at, reactions, replies FROM posts ORDER BY id DESC LIMIT ? OFFSET ?',
+    args: [limit, offset],
+  });
+  const countResult = await db.execute('SELECT COUNT(*) as total FROM posts');
+  const total = Number(countResult.rows[0].total);
+  return {
+    posts: result.rows.map(parsePost),
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+  };
 }
 
-function getPostsByDate(dateStr) {
-  const db = readDB();
-  // dateStr = "2026-04-09"
-  const posts = db.posts
-    .filter((p) => p.created_at.startsWith(dateStr))
-    .map(stripToken);
-  return posts;
+async function getPostsByDate(dateStr) {
+  const result = await db.execute({
+    sql: "SELECT id, content, created_at, reactions, replies FROM posts WHERE created_at LIKE ? ORDER BY id DESC",
+    args: [`${dateStr}%`],
+  });
+  return result.rows.map(parsePost);
 }
 
-function getAvailableDates() {
-  const db = readDB();
-  const dates = new Set();
-  db.posts.forEach((p) => dates.add(p.created_at.slice(0, 10)));
-  return [...dates].sort().reverse();
+async function getAvailableDates() {
+  const result = await db.execute(
+    "SELECT DISTINCT substr(created_at, 1, 10) as date FROM posts ORDER BY date DESC"
+  );
+  return result.rows.map((r) => r.date);
 }
 
-function getTodayPosts() {
-  const db = readDB();
+async function getTodayPosts() {
   const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  return db.posts
-    .filter((p) => p.created_at >= startOfDay)
-    .map(stripToken);
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return getPostsByDate(today);
 }
 
 module.exports = {
