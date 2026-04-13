@@ -39,6 +39,12 @@ const EMOJIS = ['❤️', '😂', '😢', '👍', '🔥', '🍃'];
 let activeEchoPositions = [];
 // 현재 화면에 떠있는 post id 집합 (중복 방지)
 const activeEchoIds = new Set();
+// 현재 날씨 상태 (에코에 바람/비 효과 연동)
+let currentWeatherState = 'clear';
+// 천둥 떨림 타이머
+let thunderShakeInterval = null;
+// 비 드롭 타이머
+let raindropInterval = null;
 
 // ===== 사운드 토글 =====
 soundToggle.addEventListener('click', () => {
@@ -138,6 +144,13 @@ async function refreshEcho() {
   stopEcho();
   activeEchoPositions = [];
   activeEchoIds.clear();
+
+  // 기존 에코들의 타이머 정리
+  document.querySelectorAll('.echo-msg').forEach((el) => {
+    if (el._explodeTimer) clearTimeout(el._explodeTimer);
+    if (el._removeTimer) clearTimeout(el._removeTimer);
+  });
+
   try {
     const res = await fetch('/api/posts/today');
     todayPosts = await res.json();
@@ -198,15 +211,35 @@ function spawnEcho() {
   if (!post) return;
 
   activeEchoIds.add(post.id);
+
   const el = document.createElement('div');
   el.className = 'echo-msg';
   el.style.cursor = 'pointer';
 
-  const textSpan = document.createElement('span');
-  textSpan.textContent = post.content.length > 60
+  const text = post.content.length > 60
     ? post.content.slice(0, 60) + '...'
     : post.content;
-  el.appendChild(textSpan);
+
+  // 글자 단위로 렌더링 (개별 span)
+  const textContainer = document.createElement('div');
+  textContainer.className = 'echo-text';
+  renderCharByChar(textContainer, text);
+  el.appendChild(textContainer);
+
+  // Pretext로 정확한 크기 측정
+  let estWidth = Math.min(text.length * 13 + 32, 340);
+  let estHeight = 60;
+  if (window.pretext && window.pretext.prepare) {
+    try {
+      const font = '18px "Mona12 Text KR", monospace';
+      const prepared = window.pretext.prepare(text, font);
+      const result = window.pretext.layout(prepared, 308, 30);
+      if (result && result.height) {
+        estHeight = result.height + 24;
+        estWidth = result.lineCount <= 1 ? Math.min(text.length * 13 + 32, 340) : 340;
+      }
+    } catch {}
+  }
 
   // 클릭 → 팝업
   el.addEventListener('click', (e) => {
@@ -221,14 +254,18 @@ function spawnEcho() {
     delBtn.textContent = 'x';
     delBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      deletePostById(post.id);
+      explodeEcho(el);
+      setTimeout(() => deletePostById(post.id), 100);
     });
     el.appendChild(delBtn);
   }
 
+  // 날씨에 따른 바람 효과
+  if (['rain', 'snow', 'thunder'].includes(currentWeatherState)) {
+    el.classList.add('windy');
+  }
+
   const stage = echoContainer.parentElement.getBoundingClientRect();
-  const estWidth = Math.min(textSpan.textContent.length * 12, 340);
-  const estHeight = 60;
   const pos = findNonOverlappingPosition(stage, estWidth, estHeight);
 
   el.style.left = pos.x + 'px';
@@ -238,11 +275,83 @@ function spawnEcho() {
   activeEchoPositions.push(posRecord);
 
   echoContainer.appendChild(el);
-  el.addEventListener('animationend', () => {
-    el.remove();
+
+  // 생명 주기: fade in → 6.5초 대기 → 파편 폭발 → 제거
+  const cleanup = () => {
+    if (el.parentNode) el.remove();
     const idx = activeEchoPositions.indexOf(posRecord);
     if (idx !== -1) activeEchoPositions.splice(idx, 1);
     activeEchoIds.delete(post.id);
+  };
+
+  el._explodeTimer = setTimeout(() => explodeEcho(el), 6500);
+  el._removeTimer = setTimeout(cleanup, 9000);
+}
+
+// 텍스트를 글자 단위 span으로 렌더링
+function renderCharByChar(container, text) {
+  const lines = text.split('\n');
+  let globalIdx = 0;
+  lines.forEach((line, lineIdx) => {
+    if (lineIdx > 0) container.appendChild(document.createElement('br'));
+    for (const ch of line) {
+      const span = document.createElement('span');
+      span.className = 'echo-char';
+      span.textContent = ch === ' ' ? '\u00A0' : ch;
+      span.style.setProperty('--i', globalIdx++);
+      container.appendChild(span);
+    }
+  });
+}
+
+// 에코 파편 폭발 (수명 끝 or 삭제 시)
+function explodeEcho(el) {
+  if (el.dataset.exploding) return;
+  el.dataset.exploding = '1';
+
+  const chars = el.querySelectorAll('.echo-char');
+  const textContainer = el.querySelector('.echo-text');
+  const containerRect = textContainer.getBoundingClientRect();
+
+  // 1단계: 먼저 모든 글자의 현재 위치 수집 (absolute 변경 전!)
+  const positions = [];
+  chars.forEach((span) => {
+    const rect = span.getBoundingClientRect();
+    positions.push({
+      x: rect.left - containerRect.left,
+      y: rect.top - containerRect.top,
+      w: rect.width,
+      h: rect.height,
+    });
+  });
+
+  // 컨테이너 크기 고정 (absolute 자식들 때문에 쭈그러들지 않게)
+  textContainer.style.width = containerRect.width + 'px';
+  textContainer.style.height = containerRect.height + 'px';
+  textContainer.style.position = 'relative';
+
+  // 바람 효과 먼저 제거 (specificity 충돌 방지)
+  el.classList.remove('windy');
+
+  // 2단계: 일괄 absolute 적용 + 폭발 애니메이션 트리거
+  chars.forEach((span, idx) => {
+    const p = positions[idx];
+    span.style.position = 'absolute';
+    span.style.left = p.x + 'px';
+    span.style.top = p.y + 'px';
+    span.style.margin = '0';
+
+    // 부드럽게 흩어지는 방향 (위쪽 편향, 바람에 날리는 느낌)
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 20 + Math.random() * 40;
+    const dx = Math.cos(angle) * speed;
+    const dy = Math.sin(angle) * speed - 30;
+
+    span.style.setProperty('--dx', dx + 'px');
+    span.style.setProperty('--dy', dy + 'px');
+
+    span.classList.remove('raindrop');
+    span.classList.add('exploding');
   });
 }
 
@@ -589,7 +698,20 @@ function applyDayNightByHour() {
 
 function applyWeather(weather) {
   if (weatherInterval) clearInterval(weatherInterval);
+  if (raindropInterval) clearInterval(raindropInterval);
+  if (thunderShakeInterval) clearInterval(thunderShakeInterval);
   weatherLayer.innerHTML = '';
+
+  currentWeatherState = weather;
+
+  // 기존 에코에 바람 효과 토글
+  const existingEchoes = document.querySelectorAll('.echo-msg');
+  const windy = ['rain', 'snow', 'thunder'].includes(weather);
+  existingEchoes.forEach((e) => {
+    if (e.dataset.exploding) return;
+    if (windy) e.classList.add('windy');
+    else e.classList.remove('windy');
+  });
 
   // 천둥 효과
   const existingLightning = document.querySelector('.weather-lightning');
@@ -600,11 +722,29 @@ function applyWeather(weather) {
     const count = weather === 'thunder' ? 40 : 30;
     weatherInterval = setInterval(() => spawnParticle(emojis, 'weather-rain', count), 150);
 
+    // 비: 가끔 랜덤한 에코 글자 하나가 물방울 맞은 듯 떨어짐
+    raindropInterval = setInterval(() => {
+      const allChars = document.querySelectorAll('.echo-msg:not([data-exploding="1"]) .echo-char');
+      if (allChars.length === 0) return;
+      const target = allChars[Math.floor(Math.random() * allChars.length)];
+      target.classList.add('raindrop');
+      setTimeout(() => target.classList.remove('raindrop'), 700);
+    }, 600);
+
     if (weather === 'thunder') {
       const flash = document.createElement('div');
       flash.className = 'weather-lightning';
       flash.style.animationDuration = (4 + Math.random() * 6) + 's';
       document.body.appendChild(flash);
+
+      // 천둥: 번쩍할 때 모든 에코 떨림
+      thunderShakeInterval = setInterval(() => {
+        const echoes = document.querySelectorAll('.echo-msg:not([data-exploding="1"])');
+        echoes.forEach((e) => {
+          e.classList.add('thunder-shake');
+          setTimeout(() => e.classList.remove('thunder-shake'), 300);
+        });
+      }, 6000);
     }
   } else if (weather === 'snow') {
     const emojis = ['❄️', '❄️', '❄️', '⛄'];

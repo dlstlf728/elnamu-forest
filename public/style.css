@@ -254,10 +254,81 @@ body.light .tree {
   line-height: 1.7;
   color: var(--text);
   opacity: 0;
-  animation: echoLife 8s ease-in-out forwards;
+  animation: echoFadeIn 1s ease-out forwards, echoFloat 6s ease-in-out infinite 1s;
   pointer-events: auto;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+/* 글자 단위 컨테이너 */
+.echo-text {
+  display: inline-block;
+  position: relative;
+  line-height: 1.7;
+}
+
+/* 개별 글자 */
+.echo-char {
+  display: inline-block;
+  will-change: transform, opacity;
+  transition: transform 0.2s ease-out;
+}
+
+/* ===== 바람 효과 (비/눈/천둥 시) ===== */
+.echo-msg.windy .echo-char {
+  animation: charSway 3s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+@keyframes charSway {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  25%      { transform: translate(1.5px, -0.5px) rotate(1.5deg); }
+  50%      { transform: translate(-1px, 0.5px) rotate(-1deg); }
+  75%      { transform: translate(0.5px, 0) rotate(0.5deg); }
+}
+
+/* ===== 비 효과 - 랜덤 글자가 물방울 맞은 듯 처짐 ===== */
+.echo-char.raindrop {
+  animation: charDrop 0.7s ease-out;
+}
+
+@keyframes charDrop {
+  0%   { transform: translateY(0); }
+  30%  { transform: translateY(5px) scaleY(1.15); }
+  100% { transform: translateY(0); }
+}
+
+/* ===== 천둥 - 전체 떨림 ===== */
+.echo-msg.thunder-shake {
+  animation: thunderShake 0.3s ease-in-out;
+}
+
+@keyframes thunderShake {
+  0%, 100% { transform: translate(0, 0); }
+  20%      { transform: translate(-3px, 1px); }
+  40%      { transform: translate(3px, -1px); }
+  60%      { transform: translate(-2px, 0); }
+  80%      { transform: translate(2px, 1px); }
+}
+
+/* ===== 파편 흩어짐 (수명 끝 or 삭제 시) ===== */
+.echo-char.exploding {
+  position: absolute !important;
+  animation: charDrift 2.5s ease-in-out forwards !important;
+}
+
+@keyframes charDrift {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.9;
+  }
+  60% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.8);
+    opacity: 0;
+  }
 }
 
 .echo-msg .echo-delete {
@@ -282,11 +353,16 @@ body.light .tree {
   color: var(--white);
 }
 
-@keyframes echoLife {
-  0%   { opacity: 0; transform: translateY(8px); }
-  12%  { opacity: 0.9; transform: translateY(0); }
-  75%  { opacity: 0.9; }
-  100% { opacity: 0; transform: translateY(-6px); }
+@keyframes echoFadeIn {
+  0%   { opacity: 0; }
+  100% { opacity: 0.9; }
+}
+
+@keyframes echoFloat {
+  0%, 100% { transform: translateX(0) translateY(0) rotate(0deg); }
+  25%      { transform: translateX(3px) translateY(-2px) rotate(0.5deg); }
+  50%      { transform: translateX(-2px) translateY(1px) rotate(-0.3deg); }
+  75%      { transform: translateX(1px) translateY(-1px) rotate(0.2deg); }
 }
 
 .forest-empty {

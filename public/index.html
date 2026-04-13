@@ -107,6 +107,13 @@
   <!-- 날씨 효과 레이어 (body 직속, fixed) -->
   <div id="weatherLayer" class="weather-layer"></div>
 
+  <!-- Pretext: DOM-free 텍스트 레이아웃 엔진 -->
+  <script type="module">
+    import * as pretext from 'https://esm.sh/@chenglou/pretext';
+    window.pretext = pretext;
+    window.dispatchEvent(new Event('pretext-loaded'));
+  </script>
+
   <script src="audio.js"></script>
   <script src="app.js"></script>
 </body>
